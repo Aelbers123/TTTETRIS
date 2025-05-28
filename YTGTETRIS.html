@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tetris Game</title>
+  <style>
+    canvas {
+      border: 1px solid #000;
+      display: block;
+      margin: 0 auto;
+    }
+    #controls, #next, #score-display {
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="200" height="400"></canvas>
+  <div id="controls">
+    <button id="toggle-music">Toggle Music</button>
+    <button id="restart-btn">Restart</button>
+  </div>
+  <div id="next">
+    <p>Next Block:</p>
+    <canvas id="next-block" width="80" height="80"></canvas>
+  </div>
+  <div id="score-display">
+    <p>Score: <span id="score">0</span></p>
+    <p>High Score: <span id="high-score">0</span></p>
+    <p>Level: <span id="level">1</span></p>
+    <p id="game-over" style="display:none; color:red; font-weight:bold;">Game Over! Final Score: <span id="final-score"></span></p>
+  </div>
+  <audio id="bg-music" loop>
+    <source src="https://www.bensound.com/bensound-music/bensound-dubstep.mp3" type="audio/mpeg" />
+  </audio>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const nextCanvas = document.getElementById('next-block');
+    const nextCtx = nextCanvas.getContext('2d');
+    const toggleMusicBtn = document.getElementById('toggle-music');
+    const restartBtn = document.getElementById('restart-btn');
+    const music = document.getElementById('bg-music');
+    const scoreDisplay = document.getElementById('score');
+    const highScoreDisplay = document.getElementById('high-score');
+    const levelDisplay = document.getElementById('level');
+    const gameOverDisplay = document.getElementById('game-over');
+    const finalScoreDisplay = document.getElementById('final-score');
+
+    let score = 0;
+    let level = 1;
+    let linesClearedTotal = 0;
+    let dropInterval = 1000;
+    let gameInterval;
+
+    let highScore = localStorage.getItem('highScore') || 0;
+    highScoreDisplay.textContent = highScore;
+
+    toggleMusicBtn.addEventListener('click', () => {
+      if (music.paused) music.play();
+      else music.pause();
+    });
+
+    restartBtn.addEventListener('click', () => {
+      location.reload();
+    });
+
+    const ROWS = 20;
+    const COLS = 10;
+    const BLOCK_SIZE = 20;
+    const COLORS = ['cyan', 'blue', 'orange', 'yellow', 'green', 'purple', 'red'];
+
+    const SHAPES = [
+      [[1, 1, 1, 1]],
+      [[1, 0, 0], [1, 1, 1]],
+      [[0, 0, 1], [1, 1, 1]],
+      [[1, 1], [1, 1]],
+      [[0, 1, 1], [1, 1, 0]],
+      [[0, 1, 0], [1, 1, 1]],
+      [[1, 1, 0], [0, 1, 1]]
+    ];
+
+    let board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+
+    function drawBlock(x, y, color, context = ctx, opacity = 1) {
+      context.globalAlpha = opacity;
+      context.fillStyle = color;
+      context.fillRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+      context.strokeRect(x * BLOCK_SIZE, y * BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+      context.globalAlpha = 1;
+    }
+
+    function drawBoard() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      board.forEach((row, y) => row.forEach((val, x) => {
+        if (val) drawBlock(x, y, COLORS[val - 1]);
+      }));
+    }
+
+    function randomPiece() {
+      const index = Math.floor(Math.random() * SHAPES.length);
+      return {
+        shape: SHAPES[index],
+        color: COLORS[index],
+        x: 3,
+        y: 0,
+        index: index
+      };
+    }
+
+    let current = randomPiece();
+    let next = randomPiece();
+
+    function drawPiece(piece, context = ctx, opacity = 1) {
+      piece.shape.forEach((row, y) => row.forEach((val, x) => {
+        if (val) drawBlock(piece.x + x, piece.y + y, piece.color, context, opacity);
+      }));
+    }
+
+    function drawNext() {
+      nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+      next.shape.forEach((row, y) => row.forEach((val, x) => {
+        if (val) drawBlock(x, y, next.color, nextCtx);
+      }));
+    }
+
+    function drawGhost() {
+      let ghost = JSON.parse(JSON.stringify(current));
+      while (!collide(board, ghost)) ghost.y++;
+      ghost.y--;
+      drawPiece(ghost, ctx, 0.3);
+    }
+
+    function collide(board, piece) {
+      return piece.shape.some((row, dy) => row.some((val, dx) => {
+        if (val) {
+          let x = piece.x + dx;
+          let y = piece.y + dy;
+          return (
+            x < 0 || x >= COLS || y >= ROWS || (y >= 0 && board[y][x])
+          );
+        }
+        return false;
+      }));
+    }
+
+    function merge(board, piece) {
+      piece.shape.forEach((row, y) => row.forEach((val, x) => {
+        if (val && piece.y + y >= 0) board[piece.y + y][piece.x + x] = piece.index + 1;
+      }));
+    }
+
+    function clearLines() {
+      let linesCleared = 0;
+      for (let y = ROWS - 1; y >= 0; y--) {
+        if (board[y].every(cell => cell !== 0)) {
+          board.splice(y, 1);
+          board.unshift(Array(COLS).fill(0));
+          linesCleared++;
+          y++;
+        }
+      }
+      if (linesCleared > 0) {
+        score += linesCleared * 100;
+        linesClearedTotal += linesCleared;
+        scoreDisplay.textContent = score;
+        if (linesClearedTotal >= level * 5) {
+          level++;
+          levelDisplay.textContent = level;
+          dropInterval = Math.max(100, dropInterval - 100);
+          clearInterval(gameInterval);
+          gameInterval = setInterval(drop, dropInterval);
+        }
+      }
+    }
+
+    function rotate(piece) {
+      const newShape = piece.shape[0].map((_, i) => piece.shape.map(row => row[i]).reverse());
+      const clone = { ...piece, shape: newShape };
+      if (!collide(board, clone)) {
+        piece.shape = newShape;
+      }
+    }
+
+    function drop() {
+      current.y++;
+      if (collide(board, current)) {
+        current.y--;
+        merge(board, current);
+        clearLines();
+        current = next;
+        next = randomPiece();
+        drawNext();
+        if (collide(board, current)) {
+          finalScoreDisplay.textContent = score;
+          gameOverDisplay.style.display = 'block';
+          clearInterval(gameInterval);
+          if (score > highScore) {
+            localStorage.setItem('highScore', score);
+            highScoreDisplay.textContent = score;
+          }
+          return;
+        }
+      }
+      draw();
+    }
+
+    function draw() {
+      drawBoard();
+      drawGhost();
+      drawPiece(current);
+    }
+
+    document.addEventListener('keydown', e => {
+      if (e.key === 'ArrowLeft') {
+        current.x--;
+        if (collide(board, current)) current.x++;
+      } else if (e.key === 'ArrowRight') {
+        current.x++;
+        if (collide(board, current)) current.x--;
+      } else if (e.key === 'ArrowUp') {
+        rotate(current);
+      } else if (e.key === 'ArrowDown') {
+        current.y++;
+        if (collide(board, current)) {
+          current.y--;
+        }
+      } else if (e.key === ' ') {
+        while (!collide(board, current)) current.y++;
+        current.y--;
+        drop();
+      }
+      draw();
+    });
+
+    drawNext();
+    gameInterval = setInterval(drop, dropInterval);
+  </script>
+</body>
+</html>
